@@ -1,3 +1,4 @@
 cliesp
 bin
 .DS_Store
+.env
