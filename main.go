@@ -25,7 +25,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -44,6 +46,11 @@ const (
 type AppConfig struct {
 	MatchDir  string `json:"match_dir" yaml:"match_dir" toml:"match_dir" env:"MATCH_DIR"`
 	MatchFile string `json:"match_file" yaml:"match_file" toml:"match_file" env:"MATCH_FILE"`
+	// Optional commands to open files/dirs. If not set:
+	// - FileOpener: $EDITOR or "vim"
+	// - DirOpener: platform default (open | xdg-open | explorer)
+	FileOpener string `json:"file_opener" yaml:"file_opener" toml:"file_opener" env:"FILE_OPENER"`
+	DirOpener  string `json:"dir_opener" yaml:"dir_opener" toml:"dir_opener" env:"DIR_OPENER"`
 }
 
 func expandHome(path string) (string, error) {
@@ -181,6 +188,85 @@ func resolveMatchPath(flagPath string, cfg AppConfig) (string, error) {
 	return filepath.Join(dir, file), nil
 }
 
+// defineFlags wires up flags on the provided FlagSet. It supports a full and
+// shorthand for each relevant option.
+func defineFlags(fs *flag.FlagSet, matchPath *string, openFile *bool, openDir *bool) {
+	fs.StringVar(matchPath, "matchFile", "", "Path to the espanso match file (overrides config). Accepts a directory or full file path.")
+	fs.StringVar(matchPath, "m", "", "Shorthand for --matchFile")
+	fs.BoolVar(openFile, "open", false, "Open the resolved match file and exit")
+	fs.BoolVar(openFile, "o", false, "Shorthand for --open")
+	fs.BoolVar(openDir, "openDir", false, "Open the resolved match directory and exit")
+	fs.BoolVar(openDir, "d", false, "Shorthand for --openDir")
+}
+
+// checkOpenConflict ensures mutually exclusive use of --open and --dir.
+func checkOpenConflict(openFile, openDir bool) error {
+	if openFile && openDir {
+		return fmt.Errorf("flags --open and --dir are mutually exclusive")
+	}
+	return nil
+}
+
+// usage prints a concise help message.
+func usage() {
+	fmt.Fprintf(os.Stderr, "cliesp - append espanso matches or open target file/dir\n\n")
+	fmt.Fprintf(os.Stderr, "Usage:\n  cliesp [flags]\n\n")
+	fmt.Fprintf(os.Stderr, "Flags:\n")
+	fmt.Fprintf(os.Stderr, "  -m, --matchFile string   Path to match file (dir or full file path) [flag > env/.env > config > defaults]\n")
+	fmt.Fprintf(os.Stderr, "  -o, --open               Open the resolved match file and exit\n")
+	fmt.Fprintf(os.Stderr, "  -d, --openDir            Open the resolved match directory and exit\n")
+	fmt.Fprintf(os.Stderr, "  -h, --help               Show this help message\n\n")
+	fmt.Fprintf(os.Stderr, "Configuration:\n")
+	fmt.Fprintf(os.Stderr, "  Config file: ~/.config/cliesp/settings.{yaml|yml|toml|json}\n")
+	fmt.Fprintf(os.Stderr, "  Env vars (.env supported): CLIESP_MATCH_DIR, CLIESP_MATCH_FILE, CLIESP_FILE_OPENER, CLIESP_DIR_OPENER\n")
+	fmt.Fprintf(os.Stderr, "  Defaults: dir='%s', file='%s'\n", defaultEspansoMatchDir, defaultEspansoMatchFile)
+	fmt.Fprintf(os.Stderr, "  Opener defaults: file=$EDITOR or 'vim'; dir=open|xdg-open|explorer (per platform)\n")
+}
+
+// pickFileOpener selects the command to open a file based on config and env.
+func pickFileOpener(cfg AppConfig) string {
+	if s := strings.TrimSpace(cfg.FileOpener); s != "" {
+		return s
+	}
+	if ed := strings.TrimSpace(os.Getenv("EDITOR")); ed != "" {
+		return ed
+	}
+	return "vim"
+}
+
+// pickDirOpener selects the command to open a directory based on config or platform default.
+func pickDirOpener(cfg AppConfig) string {
+	if s := strings.TrimSpace(cfg.DirOpener); s != "" {
+		return s
+	}
+	switch runtime.GOOS {
+	case "linux":
+		return "xdg-open"
+	case "windows":
+		return "explorer"
+	default:
+		return "open"
+	}
+}
+
+// runOpen executes an opener command with the target path. If the opener contains
+// spaces (e.g., "code -w"), it splits into command and args.
+func runOpen(opener, target string) error {
+	parts := strings.Fields(opener)
+	if len(parts) == 0 {
+		return fmt.Errorf("invalid opener command")
+	}
+	name := parts[0]
+	args := append(parts[1:], target)
+	if _, err := exec.LookPath(name); err != nil {
+		return fmt.Errorf("could not find opener '%s' in PATH", name)
+	}
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 func main() {
 	// Preload .env files from the current working directory to ensure env
 	// variables are available via process environment even if file-based
@@ -189,8 +275,10 @@ func main() {
 
 	// Flags
 	var matchFlag string
-	flag.StringVar(&matchFlag, "matchFile", "", "Path to the espanso match file (overrides config)")
-	flag.StringVar(&matchFlag, "m", "", "Path to the espanso match file (shorthand)")
+	var openFlag bool
+	var dirFlag bool
+	flag.Usage = usage
+	defineFlags(flag.CommandLine, &matchFlag, &openFlag, &dirFlag)
 	// Allow intermixing flags and prompts
 	flag.Parse()
 
@@ -217,6 +305,28 @@ func main() {
 	if err := ensureFileWithHeader(filePath); err != nil {
 		fmt.Fprintln(os.Stderr, "error preparing file:", err)
 		os.Exit(1)
+	}
+
+	// If open/dir flags were provided, enforce mutual exclusion and open accordingly
+	if err := checkOpenConflict(openFlag, dirFlag); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if openFlag || dirFlag {
+		target := filePath
+		if dirFlag {
+			target = filepath.Dir(filePath)
+		}
+		opener := pickFileOpener(cfg)
+		if dirFlag {
+			opener = pickDirOpener(cfg)
+		}
+		if err := runOpen(opener, target); err != nil {
+			fmt.Fprintln(os.Stderr, "failed to open:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Opened %s\n", target)
+		return
 	}
 
 	triggersLine, err := prompt("triggers? (space separated list of strings): ")

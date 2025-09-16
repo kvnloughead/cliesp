@@ -96,6 +96,10 @@ CLIESP_MATCH_FILE=my.yml
 - `-m` or `--matchFile` to set the match file path. You can provide either:
   - A directory path (the configured/default filename will be used)
   - A full file path (directory + filename)
+- `-o` or `--open` to open the resolved match file and exit (no prompting)
+- `-d` or `--openDir` to open the resolved match directory and exit (no prompting)
+  - `--open` and `--openDir` are mutually exclusive
+  - On macOS this uses `open`, on Linux `xdg-open`, on Windows `explorer`
 
 Precedence: flag > env/.env > config file > defaults.
 
@@ -143,3 +147,25 @@ go test ./...
 ## Notes
 
 - YAML quoting: triggers and replace strings are quoted to be safe with spaces and special characters.
+
+### Openers configuration
+
+You can control which programs open files and directories:
+
+- Config file keys:
+  - `file_opener`: string (e.g., `"code -w"`)
+  - `dir_opener`: string (e.g., `"open"`, `"xdg-open"`)
+- Env vars:
+  - `CLIESP_FILE_OPENER`
+  - `CLIESP_DIR_OPENER`
+- Defaults:
+  - File opener: `$EDITOR` or `vim` if not set
+  - Dir opener: `open` (macOS), `xdg-open` (Linux), `explorer` (Windows)
+
+### Help
+
+Show usage:
+
+```
+./cliesp --help
+```
