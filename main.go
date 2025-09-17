@@ -36,8 +36,13 @@ import (
 
 const (
 	// Defaults if nothing is configured
-	defaultEspansoMatchDir  = "~/Library/Application Support/espanso/match"
-	defaultEspansoMatchFile = "cliesp.yml"
+	defaultEspansoMatchDir   = "~/Library/Application Support/espanso/match"
+	defaultEspansoMatchFile  = "cliesp.yml"
+	defaultMultilineMode     = "messaging"
+
+	// Multiline input modes
+	multilineModeMessaging = "messaging" // Shift+Enter for newline, Enter submits
+	multilineModeEOF       = "eof"       // EOF/Ctrl+D to submit
 )
 
 // AppConfig describes configurable fields for cliesp.
@@ -51,6 +56,8 @@ type AppConfig struct {
 	// - DirOpener: platform default (open | xdg-open | explorer)
 	FileOpener string `json:"file_opener" yaml:"file_opener" toml:"file_opener" env:"FILE_OPENER"`
 	DirOpener  string `json:"dir_opener" yaml:"dir_opener" toml:"dir_opener" env:"DIR_OPENER"`
+	// Multiline input mode: "messaging" (Shift+Enter for newline, Enter submits) or "eof" (EOF/Ctrl+D to submit)
+	MultilineMode string `json:"multiline_mode" yaml:"multiline_mode" toml:"multiline_mode" env:"MULTILINE_MODE"`
 }
 
 func expandHome(path string) (string, error) {
@@ -112,9 +119,71 @@ func prompt(s string) (string, error) {
 	return strings.TrimSpace(text), nil
 }
 
+// promptMultiline writes a message to stdout and reads multiline input.
+// The behavior depends on the mode:
+// - "messaging": Shift+Enter for newline, Enter submits (like messaging apps)
+// - "eof": Type 'EOF' on a new line or press Ctrl+D to submit (traditional)
+func promptMultiline(s string, mode string) (string, error) {
+	if mode == multilineModeMessaging {
+		return promptMultilineMessaging(s)
+	}
+	return promptMultilineEOF(s)
+}
+
+// promptMultilineEOF implements the traditional EOF-based multiline input
+func promptMultilineEOF(s string) (string, error) {
+	fmt.Print(s)
+	fmt.Println("(Type 'EOF' on a new line when finished, or press Ctrl+D)")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	var lines []string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "EOF" {
+			break
+		}
+		lines = append(lines, line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	return strings.Join(lines, "\n"), nil
+}
+
+// promptMultilineMessaging implements messaging app style input:
+// Double Enter (empty line) submits, single Enter creates newline
+func promptMultilineMessaging(s string) (string, error) {
+	fmt.Print(s)
+	fmt.Println("(Press Enter twice (empty line) to submit, single Enter for new line)")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	var lines []string
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Empty line submits (like messaging apps with double-enter)
+		if line == "" && len(lines) > 0 {
+			break
+		}
+
+		lines = append(lines, line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	return strings.Join(lines, "\n"), nil
+}
+
 // buildYAMLSnippet returns a YAML fragment representing an espanso match
 // entry. For a single trigger, the YAML uses `trigger:`; for multiple,
-// it uses an inline list with `triggers:`.
+// it uses an inline list with `triggers:`. Multiline replace strings use
+// the YAML literal block style (|) with proper indentation.
 func buildYAMLSnippet(triggers []string, replace string) string {
 	var b strings.Builder
 	b.WriteString("\n  - ")
@@ -133,8 +202,18 @@ func buildYAMLSnippet(triggers []string, replace string) string {
 		}
 		b.WriteString("]\n")
 	}
-	b.WriteString("    replace: ")
-	b.WriteString(fmt.Sprintf("%q\n", replace))
+
+	// Handle multiline replace strings with YAML literal block style
+	if strings.Contains(replace, "\n") {
+		b.WriteString("    replace: |\n")
+		// Indent each line with 6 spaces (4 for replace + 2 for literal block content)
+		for _, line := range strings.Split(replace, "\n") {
+			b.WriteString("      " + line + "\n")
+		}
+	} else {
+		b.WriteString("    replace: ")
+		b.WriteString(fmt.Sprintf("%q\n", replace))
+	}
 	return b.String()
 }
 
@@ -286,8 +365,9 @@ func main() {
 	cfg, err := cfgpkg.Load(cfgpkg.Options[AppConfig]{
 		AppName: "cliesp",
 		ConsumerConfig: AppConfig{
-			MatchDir:  defaultEspansoMatchDir,
-			MatchFile: defaultEspansoMatchFile,
+			MatchDir:      defaultEspansoMatchDir,
+			MatchFile:     defaultEspansoMatchFile,
+			MultilineMode: defaultMultilineMode,
 		},
 	})
 	if err != nil {
@@ -346,7 +426,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	replaceStr, err := prompt("replace with? (string): ")
+	// Determine multiline mode from config
+	mode := cfg.MultilineMode
+	if mode == "" {
+		mode = defaultMultilineMode
+	}
+
+	replaceStr, err := promptMultiline("replace with? (supports multiline): ", mode)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error reading replace string:", err)
 		os.Exit(1)
