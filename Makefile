@@ -1,7 +1,32 @@
-## build: builds the binary
+## build: builds the binary for current platform
 .PHONY: build
 build:
 	go build -o cliesp
+
+## build-all: builds binaries for all platforms (mac, linux, windows)
+.PHONY: build-all
+build-all: build-mac build-linux build-windows
+
+## build-mac: builds binary for macOS (Intel and Apple Silicon)
+.PHONY: build-mac
+build-mac:
+	mkdir -p bin
+	GOOS=darwin GOARCH=amd64 go build -o bin/cliesp-darwin-amd64
+	GOOS=darwin GOARCH=arm64 go build -o bin/cliesp-darwin-arm64
+
+## build-linux: builds binary for Linux (amd64 and arm64)
+.PHONY: build-linux
+build-linux:
+	mkdir -p bin
+	GOOS=linux GOARCH=amd64 go build -o bin/cliesp-linux-amd64
+	GOOS=linux GOARCH=arm64 go build -o bin/cliesp-linux-arm64
+
+## build-windows: builds binary for Windows (amd64 and arm64)
+.PHONY: build-windows
+build-windows:
+	mkdir -p bin
+	GOOS=windows GOARCH=amd64 go build -o bin/cliesp-windows-amd64.exe
+	GOOS=windows GOARCH=arm64 go build -o bin/cliesp-windows-arm64.exe
 
 ## install: builds binary and moves to ~/.local/bin
 .PHONY: install

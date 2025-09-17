@@ -2,96 +2,39 @@
 
 A small Go CLI to append entries to an [Espanso](https://espanso.org) match file.
 
-By default it writes to:
+## Installation
+
+Download the [most recent release](https://github.com/kvnloughead/cliesp/releases/new) and move the downloaded binary to somewhere in your `PATH`.
+
+## Basic Usage
+
+Simply run `cliesp` to enter interactive mode. You'll be prompted for
+
+- a space-separated list of triggers
+- what to replace them with
+
+A new match entry will be added to the configured file (which will be created if it doesn't exist). By default, the location is
 
 - `~/Library/Application Support/espanso/match/cliesp.yml`
 
-## What it does
-
-When you run the program it prompts you twice:
-  - `triggers? (space separated list of strings)`
-  - `replace with? (string)`
-
-Then it appends a YAML match entry under the `matches:` root of the match file.
-
-For a single trigger, it writes:
-    ```yaml
-    - trigger: ":example"
-      replace: "Hello"
-    ```
-For multiple triggers, it writes:
-    ```yaml
-    - triggers: [":ex1", ":ex2"]
-      replace: "Hello"
-    ```
-
-If the file doesn't exist, it creates it with the `matches:` header.
-
-## Installation
-
-```
-git clone https://github.com/kvnloughead/cliesp
-cd cliesp
-go build -o cliesp
-```
-
-Once built, move the binary `cliesp` to a folder in your PATH.
-
-## Run
-
-```
-./cliesp
-```
-
-Example session:
-
-```
-triggers? (space separated list of strings): :ex1 :ex2
-replace with? (string): Hello world
-Appended 2 trigger(s) to /Users/<you>/Library/Application Support/espanso/match/cliesp.yml
-```
+The match will use a `triggers` array if multiple values are provided. Otherwise it uses `trigger`.
 
 ## Configuration
 
-You can change the destination path and filename via:
-
-1) Config file (recommended)
-
-- Location: `~/.config/cliesp/settings.{yaml|yml|toml|json}`
-- Keys:
-  - `match_dir` (string) — directory path. `~` is supported.
-  - `match_file` (string) — filename (e.g., `cliesp.yml`).
-
-Example `~/.config/cliesp/settings.yaml`:
+The app can be configured via a config file `~/.config/cliesp/settings.{yaml|yml|toml|json}`. Configurable settings:
 
 ```yaml
 match_dir: ~/Library/Application Support/espanso/match
 match_file: cliesp.yml
+file_opener: open # On windows 'explorer', on Linux 'xdg-open'
+dir_opener: vim # EDITOR environmental variable or vim
 ```
 
-Another example with a custom directory and filename:
+You can also configure via environmental variables with the `CLIESP_` prefix. Environmental variables take precedence over values from the configuration file. For development, you can use a `.env` file inside the local repo. The following env files are loaded (in this order): `.env`, `.env.local`, `.env.production`
 
-```yaml
-match_dir: ~/espanso/match
-match_file: personal.yml
-```
+## CLI Flags
 
-2) Environment variables and .env files
-
-- Prefix: `CLIESP_`
-- Variables:
-  - `CLIESP_MATCH_DIR`
-  - `CLIESP_MATCH_FILE`
-- .env files (loaded in this order by default): `.env`, `.env.local`, `.env.production`
-
-Example `.env`:
-
-```
-CLIESP_MATCH_DIR=/tmp/espanso/match
-CLIESP_MATCH_FILE=my.yml
-```
-
-3) CLI flags (highest precedence)
+Flags take precedence over all configured settings.
 
 - `-m` or `--matchFile` to set the match file path. You can provide either:
   - A directory path (the configured/default filename will be used)
@@ -101,71 +44,11 @@ CLIESP_MATCH_FILE=my.yml
   - `--open` and `--openDir` are mutually exclusive
   - On macOS this uses `open`, on Linux `xdg-open`, on Windows `explorer`
 
-Precedence: flag > env/.env > config file > defaults.
-
-### Example espanso match file (YAML)
-
-When entries are appended, they go under the `matches:` key. A small example of the target file:
-
-```yaml
-# espanso match file
-
-# For a complete introduction, visit the official docs at: https://espanso.org/docs/
-
-# You can use this file to define the base matches (aka snippets)
-# that will be available in every application when using espanso.
-
-# Matches are substitution rules: when you type the "trigger" string
-# it gets replaced by the "replace" string.
-matches:
-  # Date example
-  - trigger: ":date"
-    replace: "{{mydate}}"
-    vars:
-      - name: mydate
-        type: date
-        params:
-          format: "%m/%d/%Y"
-
-  # Single trigger
-  - trigger: ":hello"
-    replace: "Hello world"
-
-  # Multiple triggers
-  - triggers: [":ex1", ":ex2"]
-    replace: "Example replacement"
-```
-
-## Testing
-
-Run the test suite:
+## Installation from source
 
 ```
-go test ./...
+git clone https://github.com/kvnloughead/cliesp
+cd cliesp
+go build -o cliesp
 ```
 
-## Notes
-
-- YAML quoting: triggers and replace strings are quoted to be safe with spaces and special characters.
-
-### Openers configuration
-
-You can control which programs open files and directories:
-
-- Config file keys:
-  - `file_opener`: string (e.g., `"code -w"`)
-  - `dir_opener`: string (e.g., `"open"`, `"xdg-open"`)
-- Env vars:
-  - `CLIESP_FILE_OPENER`
-  - `CLIESP_DIR_OPENER`
-- Defaults:
-  - File opener: `$EDITOR` or `vim` if not set
-  - Dir opener: `open` (macOS), `xdg-open` (Linux), `explorer` (Windows)
-
-### Help
-
-Show usage:
-
-```
-./cliesp --help
-```
